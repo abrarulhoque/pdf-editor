@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PDF Size Chart Converter</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background-color: #f8f9fa;
+        padding: 20px;
+      }
+      .container {
+        max-width: 1400px;
+        margin: 0 auto;
+        background-color: white;
+        border-radius: 10px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        padding: 30px;
+      }
+      .upload-area {
+        border: 2px dashed #ddd;
+        border-radius: 10px;
+        padding: 30px;
+        text-align: center;
+        margin-bottom: 20px;
+        min-height: 200px;
+        transition: all 0.3s;
+      }
+      .upload-area:hover,
+      .upload-area.dragover {
+        border-color: #0d6efd;
+        background-color: rgba(13, 110, 253, 0.05);
+      }
+      .pdf-viewer {
+        position: relative;
+        width: 100%;
+        height: 800px;
+        overflow: auto;
+        border: 1px solid #ddd;
+        margin-top: 20px;
+        display: none;
+      }
+      .pdf-canvas-container {
+        position: relative;
+        display: inline-block;
+      }
+      #pdf-canvas {
+        cursor: crosshair;
+      }
+      .selection-rect {
+        position: absolute;
+        border: 2px dashed #ff5722;
+        background-color: rgba(255, 87, 34, 0.1);
+        pointer-events: none;
+      }
+      .toolbar {
+        padding: 10px;
+        background-color: #f8f9fa;
+        border-bottom: 1px solid #ddd;
+        margin-bottom: 15px;
+      }
+      .preview-image {
+        max-width: 100%;
+        max-height: 300px;
+        margin: 10px 0;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+      }
+      .page-nav {
+        margin: 15px 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+      }
+      .page-info {
+        margin: 0 10px;
+      }
+      #loading {
+        display: none;
+        text-align: center;
+        margin: 20px 0;
+      }
+      .spinner-border {
+        width: 3rem;
+        height: 3rem;
+      }
+      .result-container {
+        margin-top: 20px;
+        padding: 15px;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        display: none;
+      }
+      .table-preview {
+        width: 100%;
+        max-width: 100%;
+        margin-bottom: 1rem;
+        border-collapse: collapse;
+      }
+      .table-preview th,
+      .table-preview td {
+        padding: 0.75rem;
+        border: 1px solid #dee2e6;
+        text-align: center;
+      }
+      .table-preview thead th {
+        background-color: #f8c291;
+        border-bottom: 2px solid #e67e22;
+      }
+      .table-preview tbody tr td:first-child {
+        background-color: #f8c291;
+      }
+      .queue-container {
+        margin-top: 20px;
+        padding: 15px;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+      }
+      .queue-item {
+        padding: 10px;
+        margin-bottom: 10px;
+        border: 1px solid #dee2e6;
+        border-radius: 5px;
+        background-color: #f8f9fa;
+      }
+      .queue-item.processing {
+        background-color: #e8f4fd;
+        border-color: #4dabf7;
+      }
+      .queue-item.completed {
+        background-color: #d4edda;
+        border-color: #28a745;
+      }
+      .queue-item.failed {
+        background-color: #f8d7da;
+        border-color: #dc3545;
+      }
+      .file-count-badge {
+        font-size: 0.8rem;
+        display: inline-block;
+        padding: 0.25rem 0.5rem;
+        border-radius: 10px;
+        margin-left: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1 class="text-center mb-4">PDF Size Chart Converter</h1>
+      <p class="text-center mb-4">
+        Upload PDF files, select the size chart area, and convert inches to
+        centimeters directly in the PDF
+      </p>
+
+      <div id="upload-section">
+        <div id="upload-area" class="upload-area">
+          <p class="mb-3">
+            Drop PDF files here or click to upload (supports multiple files)
+          </p>
+          <input
+            type="file"
+            id="pdf-input"
+            class="d-none"
+            accept="application/pdf"
+            multiple
+          />
+          <button id="upload-btn" class="btn btn-primary mb-3">
+            Upload PDFs
+          </button>
+          <div id="pdf-preview-container" class="text-center mt-3"></div>
+        </div>
+      </div>
+
+      <div
+        id="queue-status-container"
+        class="queue-container"
+        style="display: none"
+      >
+        <h4>
+          Processing Queue
+          <span
+            id="queue-status-badge"
+            class="badge bg-primary file-count-badge"
+            >0</span
+          >
+        </h4>
+        <div id="queue-status-list" class="mt-3"></div>
+      </div>
+
+      <div
+        id="completed-files-container"
+        class="queue-container"
+        style="display: none"
+      >
+        <h4>
+          Completed Files
+          <span
+            id="completed-files-badge"
+            class="badge bg-success file-count-badge"
+            >0</span
+          >
+        </h4>
+        <div id="completed-files-list" class="mt-3"></div>
+      </div>
+
+      <div id="pdf-viewer-section" style="display: none">
+        <div class="toolbar">
+          <div class="row align-items-center">
+            <div class="col-md-4">
+              <div class="page-nav">
+                <button id="prev-page" class="btn btn-sm btn-outline-secondary">
+                  Previous
+                </button>
+                <span class="page-info"
+                  >Page <span id="page-num">1</span> of
+                  <span id="page-count">1</span></span
+                >
+                <button id="next-page" class="btn btn-sm btn-outline-secondary">
+                  Next
+                </button>
+              </div>
+            </div>
+            <div class="col-md-4 text-center">
+              <button id="select-area-btn" class="btn btn-primary">
+                Select Size Chart Area
+              </button>
+              <button
+                id="cancel-selection-btn"
+                class="btn btn-outline-secondary"
+                style="display: none"
+              >
+                Cancel Selection
+              </button>
+            </div>
+            <div class="col-md-4 text-end">
+              <button id="process-btn" class="btn btn-success" disabled>
+                Process Selection
+              </button>
+            </div>
+          </div>
+          <div class="row mt-2">
+            <div class="col-12">
+              <p id="current-file-info" class="text-center mb-0 fst-italic">
+                Processing file: <span id="current-filename"></span>
+                <span id="queue-position-info" class="text-muted"
+                  >(1 of 1)</span
+                >
+              </p>
+            </div>
+          </div>
+        </div>
+        <div class="pdf-viewer" id="pdf-viewer">
+          <div class="pdf-canvas-container">
+            <canvas id="pdf-canvas"></canvas>
+            <div
+              class="selection-rect"
+              id="selection-rect"
+              style="display: none"
+            ></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="loading">
+        <div class="spinner-border text-primary" role="status">
+          <span class="visually-hidden">Loading...</span>
+        </div>
+        <p class="mt-2">Processing your selection...</p>
+      </div>
+
+      <div id="result-container" class="result-container">
+        <h3 class="mb-4">Converted Size Chart</h3>
+        <div id="table-preview-container"></div>
+        <div class="text-center mt-4">
+          <a id="download-btn" href="#" class="btn btn-primary" target="_blank"
+            >Download Modified PDF</a
+          >
+        </div>
+      </div>
+
+      <div
+        id="error-message"
+        class="alert alert-danger mt-3"
+        style="display: none"
+      ></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+      document.addEventListener('DOMContentLoaded', function () {
+        // Elements
+        const uploadArea = document.getElementById('upload-area')
+        const pdfInput = document.getElementById('pdf-input')
+        const uploadBtn = document.getElementById('upload-btn')
+        const pdfPreviewContainer = document.getElementById(
+          'pdf-preview-container'
+        )
+        const uploadSection = document.getElementById('upload-section')
+        const pdfViewerSection = document.getElementById('pdf-viewer-section')
+        const pdfViewer = document.getElementById('pdf-viewer')
+        const pdfCanvas = document.getElementById('pdf-canvas')
+        const selectionRect = document.getElementById('selection-rect')
+        const selectAreaBtn = document.getElementById('select-area-btn')
+        const cancelSelectionBtn = document.getElementById(
+          'cancel-selection-btn'
+        )
+        const processBtn = document.getElementById('process-btn')
+        const prevPageBtn = document.getElementById('prev-page')
+        const nextPageBtn = document.getElementById('next-page')
+        const pageNum = document.getElementById('page-num')
+        const pageCount = document.getElementById('page-count')
+        const loading = document.getElementById('loading')
+        const resultContainer = document.getElementById('result-container')
+        const tablePreviewContainer = document.getElementById(
+          'table-preview-container'
+        )
+        const downloadBtn = document.getElementById('download-btn')
+        const errorMessage = document.getElementById('error-message')
+        const queueStatusContainer = document.getElementById(
+          'queue-status-container'
+        )
+        const queueStatusList = document.getElementById('queue-status-list')
+        const queueStatusBadge = document.getElementById('queue-status-badge')
+        const completedFilesContainer = document.getElementById(
+          'completed-files-container'
+        )
+        const completedFilesList = document.getElementById(
+          'completed-files-list'
+        )
+        const completedFilesBadge = document.getElementById(
+          'completed-files-badge'
+        )
+        const currentFilename = document.getElementById('current-filename')
+        const queuePositionInfo = document.getElementById('queue-position-info')
+
+        // State
+        let currentFileId = null
+        let currentPdfFilename = null
+        let originalPdfFilename = null
+        let currentPage = 0
+        let totalPages = 0
+        let isSelecting = false
+        let startX, startY
+        let currentSelection = null
+        let selectionActive = false
+        let queueUpdateInterval = null
+
+        // File Upload Handling
+        uploadBtn.addEventListener('click', () => pdfInput.click())
+
+        pdfInput.addEventListener('change', e => {
+          if (e.target.files.length) {
+            uploadPdfs(e.target.files)
+          }
+        })
+
+        // Drag and drop functionality
+        uploadArea.addEventListener('dragover', e => {
+          e.preventDefault()
+          uploadArea.classList.add('dragover')
+        })
+
+        uploadArea.addEventListener('dragleave', () => {
+          uploadArea.classList.remove('dragover')
+        })
+
+        uploadArea.addEventListener('drop', e => {
+          e.preventDefault()
+          uploadArea.classList.remove('dragover')
+
+          if (e.dataTransfer.files.length) {
+            const pdfFiles = Array.from(e.dataTransfer.files).filter(
+              file => file.type === 'application/pdf'
+            )
+
+            if (pdfFiles.length) {
+              uploadPdfs(pdfFiles)
+            } else {
+              showError('Please upload PDF files')
+            }
+          }
+        })
+
+        // PDF Viewer Navigation
+        prevPageBtn.addEventListener('click', () => {
+          if (currentPage > 0) {
+            currentPage--
+            loadPdfPage()
+          }
+        })
+
+        nextPageBtn.addEventListener('click', () => {
+          if (currentPage < totalPages - 1) {
+            currentPage++
+            loadPdfPage()
+          }
+        })
+
+        // Area Selection
+        selectAreaBtn.addEventListener('click', () => {
+          if (!isSelecting) {
+            startAreaSelection()
+          }
+        })
+
+        cancelSelectionBtn.addEventListener('click', () => {
+          cancelSelection()
+        })
+
+        pdfCanvas.addEventListener('mousedown', e => {
+          if (isSelecting) {
+            const rect = pdfCanvas.getBoundingClientRect()
+            startX = e.clientX - rect.left
+            startY = e.clientY - rect.top
+
+            selectionRect.style.left = startX + 'px'
+            selectionRect.style.top = startY + 'px'
+            selectionRect.style.width = '0'
+            selectionRect.style.height = '0'
+            selectionRect.style.display = 'block'
+
+            pdfCanvas.addEventListener('mousemove', onMouseMove)
+          }
+        })
+
+        pdfCanvas.addEventListener('mouseup', e => {
+          if (isSelecting) {
+            pdfCanvas.removeEventListener('mousemove', onMouseMove)
+
+            const rect = pdfCanvas.getBoundingClientRect()
+            const endX = e.clientX - rect.left
+            const endY = e.clientY - rect.top
+
+            const width = Math.abs(endX - startX)
+            const height = Math.abs(endY - startY)
+
+            // Only finalize selection if it has a meaningful size
+            if (width > 20 && height > 20) {
+              selectionActive = true
+              const x = Math.min(startX, endX)
+              const y = Math.min(startY, endY)
+
+              currentSelection = { x, y, width, height }
+
+              // Update selection rectangle position and size
+              selectionRect.style.left = x + 'px'
+              selectionRect.style.top = y + 'px'
+              selectionRect.style.width = width + 'px'
+              selectionRect.style.height = height + 'px'
+
+              // Enable the process button
+              processBtn.disabled = false
+
+              // Exit selection mode
+              isSelecting = false
+
+              // Show cancel selection button
+              selectAreaBtn.style.display = 'none'
+              cancelSelectionBtn.style.display = 'inline-block'
+            } else {
+              selectionRect.style.display = 'none'
+            }
+          }
+        })
+
+        // Process Selection
+        processBtn.addEventListener('click', () => {
+          if (currentSelection && currentPdfFilename && currentFileId) {
+            processSelection()
+          }
+        })
+
+        // Functions
+        function uploadPdfs(files) {
+          const formData = new FormData()
+
+          // Add all PDF files to formData
+          for (let i = 0; i < files.length; i++) {
+            formData.append('pdfFile', files[i])
+          }
+
+          // Show loading
+          loading.style.display = 'block'
+          errorMessage.style.display = 'none'
+
+          fetch('/upload_pdf', {
+            method: 'POST',
+            body: formData
+          })
+            .then(response => response.json())
+            .then(data => {
+              loading.style.display = 'none'
+
+              if (data.success) {
+                // Start queue status polling
+                startQueuePolling()
+
+                // Show the queue containers
+                queueStatusContainer.style.display = 'block'
+
+                // If there's a next file to process
+                if (data.next_file) {
+                  // Load the first file
+                  loadFileForProcessing(data.next_file)
+                }
+
+                // Hide upload section, show PDF viewer
+                uploadSection.style.display = 'none'
+                pdfViewerSection.style.display = 'block'
+                pdfViewer.style.display = 'block'
+              } else {
+                showError(data.error || 'Failed to upload PDFs')
+              }
+            })
+            .catch(error => {
+              loading.style.display = 'none'
+              showError(`Error: ${error.message}`)
+            })
+        }
+
+        function loadFileForProcessing(fileInfo) {
+          // Store current file information
+          currentFileId = fileInfo.file_id
+          currentPdfFilename = fileInfo.internal_filename
+          originalPdfFilename = fileInfo.original_filename
+          totalPages = fileInfo.pageCount
+
+          // Set page to default (page 4 if available)
+          currentPage = fileInfo.default_page || 0
+
+          // Update UI with current file info
+          currentFilename.textContent = originalPdfFilename
+
+          // Reset page counters
+          pageNum.textContent = currentPage + 1
+          pageCount.textContent = totalPages
+
+          // Reset selection
+          cancelSelection()
+
+          // Load the PDF page
+          loadPdfPage()
+        }
+
+        function loadPdfPage() {
+          if (!currentPdfFilename) return
+
+          loading.style.display = 'block'
+          errorMessage.style.display = 'none'
+
+          // Reset selection
+          cancelSelection()
+
+          fetch(
+            `/get_pdf_page?filename=${currentPdfFilename}&page=${currentPage}`
+          )
+            .then(response => response.json())
+            .then(data => {
+              loading.style.display = 'none'
+
+              if (data.success) {
+                // Display page number
+                pageNum.textContent = currentPage + 1
+                pageCount.textContent = data.total_pages
+
+                // Create image from base64
+                const img = new Image()
+                img.onload = function () {
+                  // Set canvas size to match the image
+                  pdfCanvas.width = img.width
+                  pdfCanvas.height = img.height
+
+                  // Draw the image on the canvas
+                  const ctx = pdfCanvas.getContext('2d')
+                  ctx.drawImage(img, 0, 0)
+                }
+                img.src = data.image
+
+                // Enable/disable page navigation buttons
+                prevPageBtn.disabled = currentPage === 0
+                nextPageBtn.disabled = currentPage >= data.total_pages - 1
+              } else {
+                showError(data.error || 'Failed to load PDF page')
+              }
+            })
+            .catch(error => {
+              loading.style.display = 'none'
+              showError(`Error: ${error.message}`)
+            })
+        }
+
+        function startAreaSelection() {
+          isSelecting = true
+          pdfCanvas.style.cursor = 'crosshair'
+          selectionRect.style.display = 'none'
+          processBtn.disabled = true
+          selectionActive = false
+        }
+
+        function cancelSelection() {
+          isSelecting = false
+          selectionActive = false
+          pdfCanvas.style.cursor = 'default'
+          selectionRect.style.display = 'none'
+          processBtn.disabled = true
+          currentSelection = null
+
+          // Show select button, hide cancel button
+          selectAreaBtn.style.display = 'inline-block'
+          cancelSelectionBtn.style.display = 'none'
+        }
+
+        function onMouseMove(e) {
+          if (isSelecting) {
+            const rect = pdfCanvas.getBoundingClientRect()
+            const currentX = e.clientX - rect.left
+            const currentY = e.clientY - rect.top
+
+            const width = Math.abs(currentX - startX)
+            const height = Math.abs(currentY - startY)
+
+            const x = Math.min(startX, currentX)
+            const y = Math.min(startY, currentY)
+
+            selectionRect.style.left = x + 'px'
+            selectionRect.style.top = y + 'px'
+            selectionRect.style.width = width + 'px'
+            selectionRect.style.height = height + 'px'
+          }
+        }
+
+        function processSelection() {
+          if (!currentSelection || !currentPdfFilename || !currentFileId) return
+
+          loading.style.display = 'block'
+          errorMessage.style.display = 'none'
+          resultContainer.style.display = 'none'
+
+          const data = {
+            file_id: currentFileId,
+            filename: currentPdfFilename,
+            original_filename: originalPdfFilename,
+            page: currentPage,
+            selection: currentSelection
+          }
+
+          fetch('/process_selection', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+          })
+            .then(response => response.json())
+            .then(data => {
+              loading.style.display = 'none'
+
+              if (data.success) {
+                // If there's another file to process, load it
+                if (data.next_file) {
+                  loadFileForProcessing(data.next_file)
+
+                  // Show message that the file was queued for processing
+                  showMessage(
+                    'Size chart selection was added to processing queue',
+                    'success'
+                  )
+                } else {
+                  // No more files to process
+                  showMessage('All files have been processed', 'success')
+
+                  // Show queue status container
+                  queueStatusContainer.style.display = 'block'
+
+                  // Hide PDF viewer
+                  pdfViewerSection.style.display = 'none'
+                }
+
+                // Update queue status
+                updateQueueStatus()
+              } else {
+                showError(data.error || 'Failed to process selection')
+              }
+            })
+            .catch(error => {
+              loading.style.display = 'none'
+              showError(`Error: ${error.message}`)
+            })
+        }
+
+        function startQueuePolling() {
+          // Clear existing interval if any
+          if (queueUpdateInterval) {
+            clearInterval(queueUpdateInterval)
+          }
+
+          // Update queue status immediately
+          updateQueueStatus()
+
+          // Set up polling interval (every 3 seconds)
+          queueUpdateInterval = setInterval(updateQueueStatus, 3000)
+        }
+
+        function updateQueueStatus() {
+          fetch('/get_queue_status')
+            .then(response => response.json())
+            .then(data => {
+              if (data.success) {
+                // Update selection queue info if we're viewing files
+                if (
+                  data.selection_queue.length > 0 &&
+                  pdfViewerSection.style.display !== 'none'
+                ) {
+                  queuePositionInfo.textContent = `(${
+                    data.selection_queue.indexOf(
+                      data.selection_queue.find(
+                        f => f.file_id === currentFileId
+                      )
+                    ) + 1
+                  } of ${data.selection_queue.length})`
+                }
+
+                // Update processing queue display
+                renderQueueStatus(data)
+
+                // If all files are processed and there are no more in selection queue,
+                // show completed files list
+                if (
+                  data.selection_queue.length === 0 &&
+                  data.processing_queue.length === 0 &&
+                  data.completed_files.length > 0
+                ) {
+                  completedFilesContainer.style.display = 'block'
+                }
+              }
+            })
+            .catch(error => {
+              console.error('Error updating queue status:', error)
+            })
+        }
+
+        function renderQueueStatus(data) {
+          // Update queue badges
+          queueStatusBadge.textContent =
+            data.selection_queue.length + data.processing_queue.length
+
+          completedFilesBadge.textContent = data.completed_files.length
+
+          // Render processing queue
+          queueStatusList.innerHTML = ''
+
+          // Add processing files first
+          data.processing_queue.forEach(file => {
+            const item = document.createElement('div')
+            item.className = 'queue-item processing'
+            item.innerHTML = `
+              <div class="d-flex justify-content-between align-items-center">
+                <div>
+                  <strong>${file.original_filename}</strong>
+                  <span class="badge bg-info">Processing</span>
+                </div>
+              </div>
+            `
+            queueStatusList.appendChild(item)
+          })
+
+          // Add selection queue items
+          data.selection_queue.forEach(file => {
+            const item = document.createElement('div')
+            item.className = 'queue-item'
+            item.innerHTML = `
+              <div class="d-flex justify-content-between align-items-center">
+                <div>
+                  <strong>${file.original_filename}</strong>
+                  <span class="badge bg-secondary">Waiting for Selection</span>
+                </div>
+              </div>
+            `
+            queueStatusList.appendChild(item)
+          })
+
+          // Render completed files
+          completedFilesList.innerHTML = ''
+
+          // Add completed files
+          data.completed_files.forEach(file => {
+            const item = document.createElement('div')
+            const result = data.results[file.file_id] || {}
+
+            if (result.success) {
+              item.className = 'queue-item completed'
+              item.innerHTML = `
+                <div class="d-flex justify-content-between align-items-center">
+                  <div>
+                    <strong>${file.original_filename}</strong>
+                    <span class="badge bg-success">Completed</span>
+                  </div>
+                  <a href="/download_pdf/${file.output_filename}" class="btn btn-sm btn-primary" target="_blank">
+                    Download
+                  </a>
+                </div>
+              `
+            } else {
+              item.className = 'queue-item failed'
+              item.innerHTML = `
+                <div class="d-flex justify-content-between align-items-center">
+                  <div>
+                    <strong>${file.original_filename}</strong>
+                    <span class="badge bg-danger">Failed</span>
+                    <small class="text-danger">${
+                      result.error || 'Unknown error'
+                    }</small>
+                  </div>
+                </div>
+              `
+            }
+
+            completedFilesList.appendChild(item)
+          })
+
+          // Show/hide containers based on content
+          if (data.selection_queue.length + data.processing_queue.length > 0) {
+            queueStatusContainer.style.display = 'block'
+          } else {
+            queueStatusContainer.style.display = 'none'
+          }
+
+          if (data.completed_files.length > 0) {
+            completedFilesContainer.style.display = 'block'
+          } else {
+            completedFilesContainer.style.display = 'none'
+          }
+        }
+
+        function createTablePreview(tableData) {
+          if (!tableData || !tableData.header_row || !tableData.data_rows) {
+            tablePreviewContainer.innerHTML =
+              '<p>No valid table data available</p>'
+            return
+          }
+
+          const headerRow = tableData.header_row
+          const dataRows = tableData.data_rows
+
+          // Create table element
+          let tableHtml = '<table class="table-preview">'
+
+          // Add header row
+          tableHtml += '<thead><tr>'
+          for (const header of headerRow) {
+            tableHtml += `<th>${header}</th>`
+          }
+          tableHtml += '</tr></thead>'
+
+          // Add data rows
+          tableHtml += '<tbody>'
+          for (const row of dataRows) {
+            tableHtml += '<tr>'
+            for (let i = 0; i < headerRow.length; i++) {
+              const cell = i < row.length ? row[i] : ''
+              tableHtml += `<td>${cell}</td>`
+            }
+            tableHtml += '</tr>'
+          }
+          tableHtml += '</tbody></table>'
+
+          tablePreviewContainer.innerHTML = tableHtml
+        }
+
+        function showError(message) {
+          errorMessage.textContent = message
+          errorMessage.style.display = 'block'
+          setTimeout(() => {
+            errorMessage.style.display = 'none'
+          }, 5000)
+        }
+
+        function showMessage(message, type = 'info') {
+          errorMessage.textContent = message
+          errorMessage.className = `alert alert-${type} mt-3`
+          errorMessage.style.display = 'block'
+          setTimeout(() => {
+            errorMessage.style.display = 'none'
+          }, 3000)
+        }
+      })
+    </script>
+  </body>
+</html>
