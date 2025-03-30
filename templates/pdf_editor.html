@@ -122,6 +122,18 @@
         border: 1px solid #ddd;
         border-radius: 10px;
       }
+      /* Fixed height status container to prevent layout shifts */
+      #queue-status-container,
+      #completed-files-container {
+        height: auto;
+        min-height: 100px;
+      }
+      /* Status message container with fixed height */
+      .status-message-container {
+        height: 24px;
+        margin: 10px 0;
+        font-weight: bold;
+      }
       .queue-item {
         padding: 10px;
         margin-bottom: 10px;
@@ -231,6 +243,10 @@
               </div>
             </div>
             <div class="col-md-4 text-center">
+              <h5 id="current-filename" class="mb-2 text-truncate"></h5>
+              <div class="status-message-container">
+                <span id="processing-status-message"></span>
+              </div>
               <button id="select-area-btn" class="btn btn-primary">
                 Select Size Chart Area
               </button>
@@ -593,6 +609,23 @@
                   // Draw the image on the canvas
                   const ctx = pdfCanvas.getContext('2d')
                   ctx.drawImage(img, 0, 0)
+
+                  // Make PDF viewer visible
+                  pdfViewer.style.display = 'block'
+
+                  // Calculate scale to fit the viewport
+                  const viewerWidth = pdfViewer.clientWidth
+                  const canvasWidth = pdfCanvas.width
+
+                  // If image is wider than viewer, scale to fit
+                  if (canvasWidth > viewerWidth - 40) {
+                    // 40px for padding
+                    const scale = (viewerWidth - 40) / canvasWidth
+                    pdfCanvas.style.transform = `scale(${scale})`
+                    pdfCanvas.style.transformOrigin = 'top left'
+                  } else {
+                    pdfCanvas.style.transform = 'scale(1)'
+                  }
                 }
                 img.src = data.image
 
@@ -774,149 +807,94 @@
           fetch('/get_queue_status')
             .then(response => response.json())
             .then(data => {
-              if (data.success) {
-                // Update selection queue info if we're viewing files
-                if (
-                  data.selection_queue.length > 0 &&
-                  pdfViewerSection.style.display !== 'none'
-                ) {
-                  queuePositionInfo.textContent = `(${
-                    data.selection_queue.indexOf(
-                      data.selection_queue.find(
-                        f => f.file_id === currentFileId
-                      )
-                    ) + 1
-                  } of ${data.selection_queue.length})`
-                }
+              // Update processing queue
+              queueStatusList.innerHTML = ''
+              queueStatusBadge.textContent = data.queue.length
 
-                // Update processing queue display
-                renderQueueStatus(data)
+              if (data.queue.length > 0) {
+                queueStatusContainer.style.display = 'block'
 
-                // If all files are processed and there are no more in selection queue,
-                // show completed files list
-                if (
-                  data.selection_queue.length === 0 &&
-                  data.processing_queue.length === 0 &&
-                  data.completed_files.length > 0
-                ) {
-                  completedFilesContainer.style.display = 'block'
+                data.queue.forEach((item, index) => {
+                  const queueItem = document.createElement('div')
+                  queueItem.className = 'queue-item'
+
+                  if (item.status === 'processing') {
+                    queueItem.classList.add('processing')
+                  }
+
+                  queueItem.innerHTML = `
+                    <strong>${item.original_filename}</strong>
+                    <span class="badge ${getBadgeClass(
+                      item.status
+                    )} float-end">${item.status}</span>
+                  `
+                  queueStatusList.appendChild(queueItem)
+                })
+              } else {
+                queueStatusContainer.style.display = 'none'
+              }
+
+              // Update completed files
+              completedFilesList.innerHTML = ''
+              completedFilesBadge.textContent = data.completed.length
+
+              if (data.completed.length > 0) {
+                completedFilesContainer.style.display = 'block'
+
+                data.completed.forEach(item => {
+                  const completedItem = document.createElement('div')
+                  completedItem.className = 'queue-item'
+
+                  if (item.status === 'completed') {
+                    completedItem.classList.add('completed')
+                  } else if (item.status === 'failed') {
+                    completedItem.classList.add('failed')
+                  } else if (item.status === 'skipped') {
+                    completedItem.classList.add('skipped')
+                  }
+
+                  let downloadLink = ''
+                  if (item.status === 'completed' && item.output_filename) {
+                    downloadLink = `
+                      <a href="/download_pdf?filename=${item.output_filename}" 
+                         class="btn btn-sm btn-outline-primary float-end" 
+                         target="_blank">Download</a>
+                    `
+                  }
+
+                  completedItem.innerHTML = `
+                    <strong>${item.original_filename}</strong>
+                    <span class="badge ${getBadgeClass(item.status)} me-2">${
+                    item.status
+                  }</span>
+                    ${downloadLink}
+                  `
+                  completedFilesList.appendChild(completedItem)
+                })
+              } else {
+                completedFilesContainer.style.display = 'none'
+              }
+
+              // Update current file processing status
+              if (data.current_file) {
+                document.getElementById(
+                  'processing-status-message'
+                ).textContent = `Status: ${data.current_file.status}`
+
+                // If we have a current file ID, update the UI accordingly
+                if (currentFileId === null && data.current_file.file_id) {
+                  // Load the current file if we don't have one loaded yet
+                  loadFileForProcessing(data.current_file)
                 }
+              } else {
+                document.getElementById(
+                  'processing-status-message'
+                ).textContent = ''
               }
             })
             .catch(error => {
-              console.error('Error updating queue status:', error)
+              console.error('Error fetching queue status:', error)
             })
-        }
-
-        function renderQueueStatus(data) {
-          // Update queue badges
-          queueStatusBadge.textContent =
-            data.selection_queue.length + data.processing_queue.length
-
-          completedFilesBadge.textContent = data.completed_files.length
-
-          // Render processing queue
-          queueStatusList.innerHTML = ''
-
-          // Add processing files first
-          data.processing_queue.forEach(file => {
-            const item = document.createElement('div')
-            item.className = 'queue-item processing'
-            item.innerHTML = `
-              <div class="d-flex justify-content-between align-items-center">
-                <div>
-                  <strong>${file.original_filename}</strong>
-                  <span class="badge bg-info">Processing</span>
-                </div>
-              </div>
-            `
-            queueStatusList.appendChild(item)
-          })
-
-          // Add selection queue items
-          data.selection_queue.forEach(file => {
-            const item = document.createElement('div')
-            item.className = 'queue-item'
-            item.innerHTML = `
-              <div class="d-flex justify-content-between align-items-center">
-                <div>
-                  <strong>${file.original_filename}</strong>
-                  <span class="badge bg-secondary">Waiting for Selection</span>
-                </div>
-              </div>
-            `
-            queueStatusList.appendChild(item)
-          })
-
-          // Render completed files
-          completedFilesList.innerHTML = ''
-
-          // Add completed files
-          data.completed_files.forEach(file => {
-            const item = document.createElement('div')
-            const result = data.results[file.file_id] || {}
-            const status =
-              file.status ||
-              (result.skipped
-                ? 'skipped'
-                : result.success
-                ? 'completed'
-                : 'failed')
-
-            if (status === 'completed') {
-              item.className = 'queue-item completed'
-              item.innerHTML = `
-                <div class="d-flex justify-content-between align-items-center">
-                  <div>
-                    <strong>${file.original_filename}</strong>
-                    <span class="badge bg-success">Completed</span>
-                  </div>
-                  <a href="/download_pdf/${file.output_filename}" class="btn btn-sm btn-primary" target="_blank">
-                    Download
-                  </a>
-                </div>
-              `
-            } else if (status === 'skipped') {
-              item.className = 'queue-item skipped'
-              item.innerHTML = `
-                <div class="d-flex justify-content-between align-items-center">
-                  <div>
-                    <strong>${file.original_filename}</strong>
-                    <span class="badge bg-warning">Skipped</span>
-                    <small class="text-muted">No size chart</small>
-                  </div>
-                </div>
-              `
-            } else {
-              item.className = 'queue-item failed'
-              item.innerHTML = `
-                <div class="d-flex justify-content-between align-items-center">
-                  <div>
-                    <strong>${file.original_filename}</strong>
-                    <span class="badge bg-danger">Failed</span>
-                    <small class="text-danger">${
-                      result.error || 'Unknown error'
-                    }</small>
-                  </div>
-                </div>
-              `
-            }
-
-            completedFilesList.appendChild(item)
-          })
-
-          // Show/hide containers based on content
-          if (data.selection_queue.length + data.processing_queue.length > 0) {
-            queueStatusContainer.style.display = 'block'
-          } else {
-            queueStatusContainer.style.display = 'none'
-          }
-
-          if (data.completed_files.length > 0) {
-            completedFilesContainer.style.display = 'block'
-          } else {
-            completedFilesContainer.style.display = 'none'
-          }
         }
 
         function createTablePreview(tableData) {
@@ -969,6 +947,21 @@
           setTimeout(() => {
             errorMessage.style.display = 'none'
           }, 3000)
+        }
+
+        function getBadgeClass(status) {
+          switch (status) {
+            case 'processing':
+              return 'bg-info'
+            case 'completed':
+              return 'bg-success'
+            case 'failed':
+              return 'bg-danger'
+            case 'skipped':
+              return 'bg-warning'
+            default:
+              return 'bg-secondary'
+          }
         }
       })
     </script>
