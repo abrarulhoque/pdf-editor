@@ -136,6 +136,12 @@ def process_file_background(session_id, file_info):
                     "error": f"Page {page_num} does not exist"
                 }
             doc.close()
+
+            # Delete the original file even if processing failed
+            try:
+                os.remove(filepath)
+            except Exception as e:
+                print(f"Error deleting file {filepath}: {str(e)}")
             return
 
         # Get the page
@@ -211,8 +217,15 @@ def process_file_background(session_id, file_info):
                         "internal_filename": internal_filename,
                         "original_filename": original_filename,
                         "output_filename": output_filename,
+                        "status": "completed",
                     }
                 )
+
+            # Delete the original file after successful processing
+            try:
+                os.remove(filepath)
+            except Exception as e:
+                print(f"Error deleting file {filepath}: {str(e)}")
         else:
             doc.close()
             # Update status and result with failure
@@ -223,6 +236,12 @@ def process_file_background(session_id, file_info):
                     "error": result.get("explanation", "Failed to process size chart"),
                 }
 
+            # Delete the original file even if processing failed
+            try:
+                os.remove(filepath)
+            except Exception as e:
+                print(f"Error deleting file {filepath}: {str(e)}")
+
     except Exception as e:
         traceback.print_exc()
         # Update status with error
@@ -232,6 +251,13 @@ def process_file_background(session_id, file_info):
                 "success": False,
                 "error": f"Error: {str(e)}",
             }
+
+        # Delete the original file even if an exception occurred
+        try:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+        except Exception as del_e:
+            print(f"Error deleting file {filepath}: {str(del_e)}")
 
 
 # Routes
@@ -559,6 +585,79 @@ def clear_queues():
         # Don't clear completed files as user might want to download them
 
     return jsonify({"success": True, "message": "Queues cleared"})
+
+
+@app.route("/skip_file", methods=["POST"])
+def skip_file():
+    """Skip a file that doesn't have a size chart"""
+    try:
+        session_id = session.get("session_id")
+        if not session_id:
+            return jsonify({"error": "Invalid session"}), 400
+
+        data = request.json
+        file_id = data.get("file_id")
+        internal_filename = data.get("filename")
+
+        if not internal_filename or not file_id:
+            return jsonify({"error": "Missing required parameters"}), 400
+
+        filepath = os.path.join(UPLOAD_FOLDER, internal_filename)
+
+        with processing_lock:
+            # Remove from selection queue
+            if session_id in selection_queue and selection_queue[session_id]:
+                selection_queue[session_id] = [
+                    f for f in selection_queue[session_id] if f["file_id"] != file_id
+                ]
+
+            # Get next file in queue
+            next_file = (
+                selection_queue[session_id][0] if selection_queue[session_id] else None
+            )
+
+            # Add to completed_files with skipped status
+            if session_id not in completed_files:
+                completed_files[session_id] = []
+
+            completed_files[session_id].append(
+                {
+                    "file_id": file_id,
+                    "internal_filename": internal_filename,
+                    "original_filename": data.get("original_filename", "Unknown file"),
+                    "status": "skipped",
+                }
+            )
+
+            # Set status in processing results
+            processing_status[file_id] = "skipped"
+            processing_results[file_id] = {
+                "success": False,
+                "skipped": True,
+                "message": "File skipped by user",
+            }
+
+            # Delete the file from uploads
+            try:
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+            except Exception as e:
+                print(f"Error deleting file {filepath}: {str(e)}")
+
+        # Return status and next file information
+        return jsonify(
+            {
+                "success": True,
+                "message": "File skipped",
+                "file_id": file_id,
+                "next_file": next_file,
+                "files_remaining": len(selection_queue[session_id]),
+            }
+        )
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"success": False, "error": f"Error: {str(e)}"}), 500
 
 
 # Original helper functions

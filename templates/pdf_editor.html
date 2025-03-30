@@ -141,6 +141,10 @@
         background-color: #f8d7da;
         border-color: #dc3545;
       }
+      .queue-item.skipped {
+        background-color: #fff3cd;
+        border-color: #ffda6a;
+      }
       .file-count-badge {
         font-size: 0.8rem;
         display: inline-block;
@@ -241,6 +245,9 @@
             <div class="col-md-4 text-end">
               <button id="process-btn" class="btn btn-success" disabled>
                 Process Selection
+              </button>
+              <button id="skip-btn" class="btn btn-outline-warning">
+                Skip (No Size Chart)
               </button>
             </div>
           </div>
@@ -476,6 +483,13 @@
           }
         })
 
+        // Skip file button
+        document.getElementById('skip-btn').addEventListener('click', () => {
+          if (currentPdfFilename && currentFileId) {
+            skipCurrentFile()
+          }
+        })
+
         // Functions
         function uploadPdfs(files) {
           const formData = new FormData()
@@ -694,6 +708,55 @@
             })
         }
 
+        function skipCurrentFile() {
+          loading.style.display = 'block'
+          errorMessage.style.display = 'none'
+
+          const data = {
+            file_id: currentFileId,
+            filename: currentPdfFilename,
+            original_filename: originalPdfFilename
+          }
+
+          fetch('/skip_file', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+          })
+            .then(response => response.json())
+            .then(data => {
+              loading.style.display = 'none'
+
+              if (data.success) {
+                // If there's another file to process, load it
+                if (data.next_file) {
+                  loadFileForProcessing(data.next_file)
+                  showMessage('File skipped. Loading next file...', 'warning')
+                } else {
+                  // No more files to process
+                  showMessage('All files have been processed', 'success')
+
+                  // Show queue status container
+                  queueStatusContainer.style.display = 'block'
+
+                  // Hide PDF viewer
+                  pdfViewerSection.style.display = 'none'
+                }
+
+                // Update queue status
+                updateQueueStatus()
+              } else {
+                showError(data.error || 'Failed to skip file')
+              }
+            })
+            .catch(error => {
+              loading.style.display = 'none'
+              showError(`Error: ${error.message}`)
+            })
+        }
+
         function startQueuePolling() {
           // Clear existing interval if any
           if (queueUpdateInterval) {
@@ -792,8 +855,15 @@
           data.completed_files.forEach(file => {
             const item = document.createElement('div')
             const result = data.results[file.file_id] || {}
+            const status =
+              file.status ||
+              (result.skipped
+                ? 'skipped'
+                : result.success
+                ? 'completed'
+                : 'failed')
 
-            if (result.success) {
+            if (status === 'completed') {
               item.className = 'queue-item completed'
               item.innerHTML = `
                 <div class="d-flex justify-content-between align-items-center">
@@ -804,6 +874,17 @@
                   <a href="/download_pdf/${file.output_filename}" class="btn btn-sm btn-primary" target="_blank">
                     Download
                   </a>
+                </div>
+              `
+            } else if (status === 'skipped') {
+              item.className = 'queue-item skipped'
+              item.innerHTML = `
+                <div class="d-flex justify-content-between align-items-center">
+                  <div>
+                    <strong>${file.original_filename}</strong>
+                    <span class="badge bg-warning">Skipped</span>
+                    <small class="text-muted">No size chart</small>
+                  </div>
                 </div>
               `
             } else {
